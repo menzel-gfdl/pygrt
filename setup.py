@@ -1,10 +1,9 @@
-#from distutils.core import Extension
 from glob import glob
 from os.path import join
 from setuptools import Extension, find_packages, setup
 
 
-def c_grtcode():
+def grtcode():
     dirs = ["GRTCODE/{}/src".format(x) for x in ["utilities", "gas-optics"]]
     src = []
     for directory in dirs:
@@ -15,8 +14,6 @@ def c_grtcode():
                      extra_compile_args=["-fopenmp"],
                      extra_link_args=["-fopenmp"])
 
-grt = c_grtcode()
-print(type(grt))
 
 setup(
     name="pygrt",
@@ -36,5 +33,5 @@ setup(
         "numpy", 
         "pyrad @ git+http://github.com/menzel-gfdl/pylbl@line-mixing",
     ],
-    ext_modules = [c_grtcode()],
+    ext_modules = [grtcode()],
 )

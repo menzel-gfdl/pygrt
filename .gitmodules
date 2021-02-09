@@ -1,0 +1,3 @@
+[submodule "GRTCODE"]
+	path = GRTCODE
+	url = git@github.com:menzel-gfdl/GRTCODE.git

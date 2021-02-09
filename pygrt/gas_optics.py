@@ -1,10 +1,10 @@
-from ctypes import byref, CDLL, c_double, c_int, c_uint64, c_void_p, POINTER, \
-                   pointer, Structure
+from ctypes import byref, c_double, c_int, c_uint64, CDLL, POINTER, Structure
 from glob import glob
 from logging import getLogger
 from pathlib import Path
 
-from numpy import asarray
+from numpy import asarray, ones, zeros
+from numpy.ctypeslib import ndpointer
 
 from pyrad.lbl.hitran import Hitran, Voigt
 from pyrad.lbl.tips import TotalPartitionFunction

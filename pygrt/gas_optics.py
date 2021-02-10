@@ -28,7 +28,7 @@ class Gas(object):
         self.num_iso = len(database.isotopologues)
         self.mol_id = database.molecule_id
 
-    def absorption_coefficient(self, pressure, temperature, volume_mixing_ratio, grid):
+    def absorption_coefficient(self, temperature, pressure, volume_mixing_ratio, grid):
         """Calculates absorption coefficients for the gas using GRTCODE.
         Args:
             temperature: Temperature [K].

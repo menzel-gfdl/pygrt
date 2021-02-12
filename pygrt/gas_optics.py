@@ -6,6 +6,7 @@ from pathlib import Path
 from numpy import asarray, ones, zeros
 from numpy.ctypeslib import ndpointer
 
+from pyrad.lbl.continua import OzoneContinuum, WaterVaporContinuum
 from pyrad.lbl.hitran import Hitran, Voigt
 from pyrad.lbl.tips import TotalPartitionFunction
 
@@ -27,6 +28,10 @@ class Gas(object):
         self.spectral_lines = database.spectral_lines(partition_function)
         self.num_iso = len(database.isotopologues)
         self.mol_id = database.molecule_id
+        if formula == "H2O":
+            self.continuum = WaterVaporContinuum()
+        elif formula == "O3":
+            self.continuum = OzoneContinuum()
 
     def absorption_coefficient(self, temperature, pressure, volume_mixing_ratio, grid):
         """Calculates absorption coefficients for the gas using GRTCODE.
@@ -41,7 +46,7 @@ class Gas(object):
         """
         info("Calculating GRTCODE line-by-line spectra for {}.".format(self.formula))
         #Convert pressure from Pa to atm.
-        p = asarray([pressure,])*9.86923e-6
+        p = asarray([pressure*9.86923e-6,])
         t = asarray([temperature,])
         vmr = asarray([volume_mixing_ratio,])
 
@@ -69,6 +74,16 @@ class Gas(object):
         k = absorption_coefficients(center, strength, gamma, alpha, bins)
         destroy_spectral_bins(bins)
         cm_to_m = 0.01  # [m cm-1].
+
+        #Add on the continuum.
+        if self.formula == "H2O":
+            k += water_vapor_continuum(t, p, vmr, grid,
+                                       self.continuum.c_foreign.regrid(grid),
+                                       self.continuum.c_self.regrid(grid),
+                                       self.continuum.t_foreign.regrid(grid),
+                                       self.continuum.t_self.regrid(grid))
+        elif self.formula == "O3":
+            k += ozone_continuum(t, grid, self.continuum.cross_section.regrid(grid))
         return k*cm_to_m*cm_to_m
 
 
@@ -190,6 +205,34 @@ def absorption_coefficients(center, strength, gamma, alpha, bins):
     gas_optics.calc_optical_depth_line_sample(c_uint64(num_lines), c_int(num_layers),
                                               center, strength, gamma, alpha, n,
                                               bins, absorption_coefficient)
+    return absorption_coefficient
+
+
+def water_vapor_continuum(temperature, pressure, volume_mixing_ratio, grid, c_foreign,
+                          c_self, t_foreign, t_self):
+    num_layers, num_wpoints = temperature.size, grid.size
+    absorption_coefficient = zeros((num_layers, num_wpoints))
+    ps = pressure[:]*volume_mixing_ratio[:]
+    n = ones(num_layers)
+    gas_optics.calc_water_vapor_ctm_optical_depth.argtypes = [c_uint64, c_int] + \
+                                                             9*[ndpointer(c_double, flags="C_CONTIGUOUS")]
+    gas_optics.calc_water_vapor_ctm_optical_depth.restype = check_return_code
+    gas_optics.calc_water_vapor_ctm_optical_depth(c_uint64(num_wpoints), c_int(num_layers),
+                                                  absorption_coefficient, c_self,
+                                                  temperature, ps, n, t_self,
+                                                  c_foreign, pressure, t_foreign)
+    return absorption_coefficient
+
+
+def ozone_continuum(temperature, grid, cross_section):
+    num_layers, num_wpoints = temperature.size, grid.size
+    absorption_coefficient = zeros((num_layers, num_wpoints))
+    n = ones(num_layers)
+    gas_optics.calc_ozone_ctm_optical_depth.argtypes = [c_uint64, c_int] + \
+                                                       3*[ndpointer(c_double,flags="C_CONTIGUOUS")]
+    gas_optics.calc_ozone_ctm_optical_depth.restype = check_return_code
+    gas_optics.calc_ozone_ctm_optical_depth(c_uint64(num_wpoints), c_int(num_layers),
+                                            cross_section, n, absorption_coefficient)
     return absorption_coefficient
 
 

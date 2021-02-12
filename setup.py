@@ -31,7 +31,7 @@ setup(
     ],
     install_requires=[
         "numpy", 
-        "pyrad @ git+http://github.com/menzel-gfdl/pylbl@line-mixing",
+        "pyrad @ git+http://github.com/menzel-gfdl/pylbl@add-continua",
     ],
     ext_modules = [grtcode()],
 )

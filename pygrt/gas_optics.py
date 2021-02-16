@@ -3,7 +3,7 @@ from glob import glob
 from logging import getLogger
 from pathlib import Path
 
-from numpy import asarray, ones, zeros
+from numpy import asarray, mean, ones, zeros
 from numpy.ctypeslib import ndpointer
 
 from pyrad.lbl.continua import OzoneContinuum, WaterVaporContinuum
@@ -67,7 +67,7 @@ class Gas(object):
                                    self.spectral_lines.gamma_self, t, p, vmr)
 
         #Calculate doppler half-widths.
-        alpha = doppler_halfwidths(self.spectral_lines.mass[0], self.spectral_lines.v, t)
+        alpha = doppler_halfwidths(mean(self.spectral_lines.mass), self.spectral_lines.v, t)
 
         #Calculate the molecule's absorption coefficients.
         bins = create_spectral_bins(p.size, grid[0], grid.size, grid[1] - grid[0], 1.5)
@@ -178,7 +178,7 @@ def doppler_halfwidths(mass, center, temperature):
     gas_optics.calc_doppler_hw.argtypes = [c_uint64, c_int, c_double] + \
                                           3*[ndpointer(c_double, flags="C_CONTIGUOUS")]
     gas_optics.calc_doppler_hw.restype = check_return_code
-    gas_optics.calc_doppler_hw(c_uint64(num_lines), c_int(num_layers), c_double(mass),
+    gas_optics.calc_doppler_hw(c_uint64(num_lines), c_int(num_layers), c_double(mass/6.023e23),
                                center, temperature, alpha)
     return alpha
 

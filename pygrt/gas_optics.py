@@ -3,7 +3,7 @@ from glob import glob
 from logging import getLogger
 from pathlib import Path
 
-from numpy import asarray, mean, ones, zeros
+from numpy import asarray, ones, zeros
 from numpy.ctypeslib import ndpointer
 
 from pyrad.lbl.continua import OzoneContinuum, WaterVaporContinuum
@@ -25,6 +25,9 @@ class Gas(object):
         self.formula = formula
         database = Hitran(formula, line_profile, isotopologues, hitran_database)
         partition_function = TotalPartitionFunction(formula, tips_database)
+        self.avg_mass = 0.
+        for iso in database.isotopologues:
+            self.avg_mass += float(iso.mass)*float(iso.abundance)
         self.spectral_lines = database.spectral_lines(partition_function)
         self.num_iso = len(database.isotopologues)
         self.mol_id = database.molecule_id
@@ -67,7 +70,7 @@ class Gas(object):
                                    self.spectral_lines.gamma_self, t, p, vmr)
 
         #Calculate doppler half-widths.
-        alpha = doppler_halfwidths(mean(self.spectral_lines.mass), self.spectral_lines.v, t)
+        alpha = doppler_halfwidths(self.avg_mass, self.spectral_lines.v, t)
 
         #Calculate the molecule's absorption coefficients.
         bins = create_spectral_bins(p.size, grid[0], grid.size, grid[1] - grid[0], 1.5)

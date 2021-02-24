@@ -6,7 +6,6 @@ from pathlib import Path
 from numpy import asarray, ones, zeros
 from numpy.ctypeslib import ndpointer
 
-from pyrad.lbl.continua import OzoneContinuum, WaterVaporContinuum
 from pyrad.lbl.hitran import Hitran, Voigt
 from pyrad.lbl.tips import TotalPartitionFunction
 
@@ -31,10 +30,6 @@ class Gas(object):
         self.spectral_lines = database.spectral_lines(partition_function)
         self.num_iso = len(database.isotopologues)
         self.mol_id = database.molecule_id
-        if formula == "H2O":
-            self.continuum = WaterVaporContinuum()
-        elif formula == "O3":
-            self.continuum = OzoneContinuum()
 
     def absorption_coefficient(self, temperature, pressure, volume_mixing_ratio, grid):
         """Calculates absorption coefficients for the gas using GRTCODE.
@@ -77,16 +72,6 @@ class Gas(object):
         k = absorption_coefficients(center, strength, gamma, alpha, bins)
         destroy_spectral_bins(bins)
         cm_to_m = 0.01  # [m cm-1].
-
-        #Add on the continuum.
-        if self.formula == "H2O":
-            k += water_vapor_continuum(t, p, vmr, grid,
-                                       self.continuum.c_foreign.regrid(grid),
-                                       self.continuum.c_self.regrid(grid),
-                                       self.continuum.t_foreign.regrid(grid),
-                                       self.continuum.t_self.regrid(grid))
-        elif self.formula == "O3":
-            k += ozone_continuum(t, grid, self.continuum.cross_section.regrid(grid))
         return k*cm_to_m*cm_to_m
 
 

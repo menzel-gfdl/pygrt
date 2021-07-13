@@ -6,8 +6,8 @@ from pathlib import Path
 from numpy import asarray, ones, zeros
 from numpy.ctypeslib import ndpointer
 
-from pyrad.lbl.hitran import Hitran, Voigt
-from pyrad.lbl.tips import TotalPartitionFunction
+from hapi2 import fetch_isotopologues, fetch_molecules, fetch_parameter_metas, \
+                  fetch_transitions, init, Molecule, Transition
 
 
 info = getLogger(__name__).info
@@ -17,19 +17,73 @@ HOST = -1
 GRTCODE_SUCCESS = 0
 
 
+def create_local_database(numin=0, numax=60000, line_list="line-list"):
+    """Downloads HITRAN line-by-line data and creates a local SQL database.
+
+    Args:
+        numin: Wavenumber lower bound [cm-1].
+        numax: Wavenumber upper bound [cm-1].
+        line_list: Name for temporary files.
+    """
+    fetch_parameter_metas()
+    molecules = fetch_molecules()
+    for molecule in molecules:
+        if str(molecule) in ["Sulfur Hexafluoride", "Chlorine Nitrate"]: continue
+        try:
+            isotopologues = fetch_isotopologues(molecule)
+            transitions = fetch_transitions(isotopologues, numin, numax, line_list)
+        except Exception as e:
+            if str(e) != "Failed to retrieve data for given parameters.": raise
+
+
+def load_line_parameters(formula, numin=500, numax=505):
+    """Reads the HITRAN molecular line parameters from a local SQL database.
+
+    Args:
+        formula: String chemical formula (i.e. H2O).
+    """
+    lines = Molecule(formula).transitions.filter(Transition.nu>=numin). \
+            filter(Transition.nu<=numax)
+    spectral_lines = SpectralLines()
+    for line in lines:
+        spectral_lines.d_air.append(line.parse.delta_air)
+        spectral_lines.en.append(line.elower)
+        spectral_lines.gamma_air.append(line.parse.gamma_air)
+        spectral_lines.gamma_self.append(line.parse.gamma_air)
+        spectral_lines.iso.append(line.isotopologue_alias_id)
+        spectral_lines.n_air.append(line.parse.n_air)
+        spectral_lines.s.append(line.sw)
+        spectral_lines.v.append(line.nu)
+    return spectral_lines.lists_to_numpy_arrays()
+
+
+class SpectralLines(object):
+    """HITRAN spectral line parameters.
+
+    """
+    parameters = ["d_air", "en", "gamma_air", "gamma_self", "iso", "n_air", "s", "v"]
+    def __init__(self):
+        for x in self.parameters:
+            setattr(self, x, [])
+
+    def lists_to_numpy_arrays(self):
+        from numpy import asarray
+        for x in self.parameters:
+            setattr(self, x, asarray(getattr(self, x)))
+
+
 class Gas(object):
-    def __init__(self, formula, hitran_database=None, isotopologues=None,
-                 line_profile=Voigt(), tips_database=None, device="host"):
+    def __init__(self, formula, device="host"):
         self.device = -1 if device.lower() == "host" else device
         self.formula = formula
-        database = Hitran(formula, line_profile, isotopologues, hitran_database)
-        partition_function = TotalPartitionFunction(formula, tips_database)
-        self.avg_mass = 0.
-        for iso in database.isotopologues:
-            self.avg_mass += float(iso.mass)*float(iso.abundance)
-        self.spectral_lines = database.spectral_lines(partition_function)
-        self.num_iso = len(database.isotopologues)
-        self.mol_id = database.molecule_id
+        init()
+        create_local_database(numin=0, numax=60000, line_list="line-list"):
+        self.spectral_lines = load_line_parameters(formula)
+
+        # Need to call hapi2 to get these values -
+        self.avg_mass = 
+        self.num_iso = 
+        self.mol_id = 
 
     def absorption_coefficient(self, temperature, pressure, volume_mixing_ratio, grid):
         """Calculates absorption coefficients for the gas using GRTCODE.

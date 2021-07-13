@@ -31,7 +31,7 @@ setup(
     ],
     install_requires=[
         "numpy", 
-        "pyrad @ git+http://github.com/menzel-gfdl/pylbl@add-continua",
+        "hapi2 @ git+http://github.com/menzel-gfdl/hapi2tmp@update-install",
     ],
     ext_modules = [grtcode()],
 )

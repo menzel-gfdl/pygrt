@@ -36,7 +36,7 @@ def create_local_database(numin=0, numax=60000, line_list="line-list"):
             if str(e) != "Failed to retrieve data for given parameters.": raise
 
 
-def load_line_parameters(formula, numin=500, numax=505):
+def load_line_parameters(formula, numin=0, numax=60000):
     """Reads the HITRAN molecular line parameters from a local SQL database.
 
     Args:
@@ -50,11 +50,12 @@ def load_line_parameters(formula, numin=500, numax=505):
         spectral_lines.en.append(line.elower)
         spectral_lines.gamma_air.append(line.parse.gamma_air)
         spectral_lines.gamma_self.append(line.parse.gamma_air)
-        spectral_lines.iso.append(line.isotopologue_alias_id)
+        spectral_lines.iso.append(line.parse.local_iso_id)
         spectral_lines.n_air.append(line.parse.n_air)
         spectral_lines.s.append(line.sw)
         spectral_lines.v.append(line.nu)
-    return spectral_lines.lists_to_numpy_arrays()
+    spectral_lines.lists_to_numpy_arrays()
+    return spectral_lines
 
 
 class SpectralLines(object):
@@ -77,13 +78,12 @@ class Gas(object):
         self.device = -1 if device.lower() == "host" else device
         self.formula = formula
         init()
-        create_local_database(numin=0, numax=60000, line_list="line-list"):
+        create_local_database(numin=0, numax=60000, line_list="line-list")
+        isotopologues = Molecule(formula).isotopologues
+        self.num_iso = len(isotopologues)
+        self.avg_mass = sum([x.abundance*x.mass for x in isotopologues])
+        self.mol_id = Molecule(formula).id
         self.spectral_lines = load_line_parameters(formula)
-
-        # Need to call hapi2 to get these values -
-        self.avg_mass = 
-        self.num_iso = 
-        self.mol_id = 
 
     def absorption_coefficient(self, temperature, pressure, volume_mixing_ratio, grid):
         """Calculates absorption coefficients for the gas using GRTCODE.

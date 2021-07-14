@@ -6,7 +6,7 @@ from pygrt.gas_optics import Gas
 
 if __name__ == "__main__":
     gas = Gas("H2O")
-    grid = arange(1., 3250., 0.01)
+    grid = arange(1., 3000., 0.1)
     temperature = asarray([230.92, 269.01, 203.37, 288.99])
     pressure = asarray([10.0, 117.0, 11419.0, 98388.0])
     vmr = asarray([4.072945e-06, 5.244536e-06, 3.039952e-06, 0.006637074])

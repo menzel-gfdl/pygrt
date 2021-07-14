@@ -30,8 +30,9 @@ setup(
         "Operating System :: OS Independent",
     ],
     install_requires=[
+        "netCDF4",
         "numpy", 
-        "hapi2 @ git+http://github.com/menzel-gfdl/hapi2tmp@update-install",
+        "hapi2 @ git+https://github.com/menzel-gfdl/hapi2tmp@update-install",
     ],
     ext_modules = [grtcode()],
 )

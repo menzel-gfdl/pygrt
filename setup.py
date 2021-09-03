@@ -11,8 +11,8 @@ def grtcode():
     return Extension("pygrt.libgrtoptics",
                      sources=src,
                      include_dirs=dirs,
-                     extra_compile_args=["-fopenmp"],
-                     extra_link_args=["-fopenmp"])
+                     extra_compile_args=[],
+                     extra_link_args=[])
 
 
 setup(

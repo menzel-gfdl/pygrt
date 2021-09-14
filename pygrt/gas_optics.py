@@ -6,9 +6,6 @@ from pathlib import Path
 from numpy import asarray, ones, zeros
 from numpy.ctypeslib import ndpointer
 
-from hapi2 import fetch_isotopologues, fetch_molecules, fetch_parameter_metas, \
-                  fetch_transitions, init, Molecule, Transition
-
 
 info = getLogger(__name__).info
 library = glob(str(Path(__file__).parent / "libgrtoptics*.so"))[0]
@@ -17,33 +14,15 @@ HOST = -1
 GRTCODE_SUCCESS = 0
 
 
-def create_local_database(numin=0, numax=60000, line_list="line-list"):
-    """Downloads HITRAN line-by-line data and creates a local SQL database.
+def _convert_line_parameters(lines):
+    """Converts from HAPI Transitions objects to local SpectralLines objects.
 
     Args:
-        numin: Wavenumber lower bound [cm-1].
-        numax: Wavenumber upper bound [cm-1].
-        line_list: Name for temporary files.
+        lines: List of HAPI Transitions objects.
+
+    Returns:
+        A SpectralLines object.
     """
-    fetch_parameter_metas()
-    molecules = fetch_molecules()
-    for molecule in molecules:
-        if str(molecule) in ["Sulfur Hexafluoride", "Chlorine Nitrate"]: continue
-        try:
-            isotopologues = fetch_isotopologues(molecule)
-            transitions = fetch_transitions(isotopologues, numin, numax, line_list)
-        except Exception as e:
-            if str(e) != "Failed to retrieve data for given parameters.": raise
-
-
-def load_line_parameters(formula, numin=0, numax=60000):
-    """Reads the HITRAN molecular line parameters from a local SQL database.
-
-    Args:
-        formula: String chemical formula (i.e. H2O).
-    """
-    lines = Molecule(formula).transitions.filter(Transition.nu>=numin). \
-            filter(Transition.nu<=numax)
     spectral_lines = SpectralLines()
     for line in lines:
         spectral_lines.d_air.append(line.parse.delta_air)
@@ -61,6 +40,15 @@ def load_line_parameters(formula, numin=0, numax=60000):
 class SpectralLines(object):
     """HITRAN spectral line parameters.
 
+    Attributes:
+        d_air: Transition pressure shift factor.
+        en: Lower state energy level.
+        gamma_air: Air-broadened halfwidth.
+        gamma_self: Self-broadened halfwidth.
+        iso: Isotopologue id.
+        n_air: Air-broadening temperature dependence power.
+        s: Transition strength.
+        v: Transition wavenumber.
     """
     parameters = ["d_air", "en", "gamma_air", "gamma_self", "iso", "n_air", "s", "v"]
     def __init__(self):
@@ -68,22 +56,17 @@ class SpectralLines(object):
             setattr(self, x, [])
 
     def lists_to_numpy_arrays(self):
-        from numpy import asarray
         for x in self.parameters:
             setattr(self, x, asarray(getattr(self, x)))
 
 
 class Gas(object):
-    def __init__(self, formula, device="host"):
-        self.device = -1 if device.lower() == "host" else device
-        self.formula = formula
-        init()
-        create_local_database(numin=0, numax=60000, line_list="line-list")
-        isotopologues = Molecule(formula).isotopologues
-        self.num_iso = len(isotopologues)
-        self.avg_mass = sum([x.abundance*x.mass for x in isotopologues])
-        self.mol_id = Molecule(formula).id
-        self.spectral_lines = load_line_parameters(formula)
+    def __init__(self, lines, mol_id, num_iso, avg_mass, device="host"):
+        self.device = HOST if device.lower() == "host" else device
+        self.num_iso = num_iso
+        self.avg_mass = avg_mass
+        self.mol_id = mol_id
+        self.spectral_lines = _convert_line_parameters(lines)
 
     def absorption_coefficient(self, temperature, pressure, volume_mixing_ratio, grid):
         """Calculates absorption coefficients for the gas using GRTCODE.
@@ -96,7 +79,8 @@ class Gas(object):
         Returns:
             Absorption coefficients [m2].
         """
-        info("Calculating GRTCODE line-by-line spectra for {}.".format(self.formula))
+        info("Calculating GRTCODE optics for molecule {}.".format(self.mol_id))
+
         #Convert pressure from Pa to atm.
         p = asarray([pressure*9.86923e-6,])
         t = asarray([temperature,])

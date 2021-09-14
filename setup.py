@@ -32,7 +32,6 @@ setup(
     install_requires=[
         "netCDF4",
         "numpy", 
-        "hapi2 @ git+https://github.com/menzel-gfdl/hapi2tmp@update-install",
     ],
     ext_modules = [grtcode()],
 )

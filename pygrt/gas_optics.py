@@ -12,6 +12,7 @@ library = glob(str(Path(__file__).parent / "libgrtoptics*.so"))[0]
 gas_optics = CDLL(library)
 HOST = -1
 GRTCODE_SUCCESS = 0
+cm_to_m = 0.01  # [m cm-1].
 
 
 def _convert_line_parameters(lines):
@@ -62,14 +63,33 @@ class SpectralLines(object):
 
 class Gas(object):
     def __init__(self, lines, mol_id, num_iso, avg_mass, device="host"):
+        """Initializes object.
+
+        Args:
+            lines: List of HAPI Transitions objects.
+            mol_id: Integer Hitran molecule identifier.
+            num_iso: Number of isotopologues in the HITRAN database for the molecule.
+            avg_mass: Mass of the molecule.
+            device: Architecture to run on.
+        """
         self.device = HOST if device.lower() == "host" else device
         self.num_iso = num_iso
         self.avg_mass = avg_mass
         self.mol_id = mol_id
         self.spectral_lines = _convert_line_parameters(lines)
 
+        # Do initial correction to the line strengths.
+        q = total_partition_functions(mol_id, num_iso, asarray([296.,]))
+        self.spectral_lines.s[:] /= correct_line_strengths(num_iso,
+                                                           self.spectral_lines.iso,
+                                                           ones(self.spectral_lines.v.size),
+                                                           self.spectral_lines.v,
+                                                           self.spectral_lines.en,
+                                                           asarray([296.,]), q)[0, :]
+
     def absorption_coefficient(self, temperature, pressure, volume_mixing_ratio, grid):
         """Calculates absorption coefficients for the gas using GRTCODE.
+
         Args:
             temperature: Temperature [K].
             pressure: Pressure [Pa].
@@ -109,7 +129,6 @@ class Gas(object):
         bins = create_spectral_bins(p.size, grid[0], grid.size, grid[1] - grid[0], 1.5)
         k = absorption_coefficients(center, strength, gamma, alpha, bins)
         destroy_spectral_bins(bins)
-        cm_to_m = 0.01  # [m cm-1].
         return k*cm_to_m*cm_to_m
 
 

@@ -13,6 +13,19 @@ gas_optics = CDLL(library)
 HOST = -1
 GRTCODE_SUCCESS = 0
 cm_to_m = 0.01  # [m cm-1].
+avogadro = 6.0221409e23 # Avogadro's constant [mol-1].
+
+
+def cpointer(var_type):
+    """Creates a contiguous numpy.ctypeslib ndpointer.
+
+    Args:
+        var_type: ctypes variable type object.
+
+    Returns:
+        A contiguous ndpointer object.
+    """
+    return ndpointer(var_type, flags="C_CONTIGUOUS")
 
 
 def _convert_line_parameters(lines):
@@ -70,7 +83,7 @@ class Gas(object):
             mol_id: Integer Hitran molecule identifier.
             num_iso: Number of isotopologues in the HITRAN database for the molecule.
             avg_mass: Mass of the molecule.
-            device: Architecture to run on.
+            device: Device (host or GPU id) to run GRTcode on.
         """
         self.device = HOST if device.lower() == "host" else device
         self.num_iso = num_iso
@@ -87,7 +100,8 @@ class Gas(object):
                                                            self.spectral_lines.en,
                                                            asarray([296.,]), q)[0, :]
 
-    def absorption_coefficient(self, temperature, pressure, volume_mixing_ratio, grid):
+    def absorption_coefficient(self, temperature, pressure, volume_mixing_ratio, grid,
+                               continuum="mt-ckd"):
         """Calculates absorption coefficients for the gas using GRTCODE.
 
         Args:
@@ -105,6 +119,7 @@ class Gas(object):
         p = asarray([pressure*9.86923e-6,])
         t = asarray([temperature,])
         vmr = asarray([volume_mixing_ratio,])
+        pedestal = (0., 2.e4) if continuum == "mt-ckd" and self.mol_id == 1 else None
 
         #Calcuate line center.
         center = pressure_shift_line_centers(self.spectral_lines.v,
@@ -127,12 +142,13 @@ class Gas(object):
 
         #Calculate the molecule's absorption coefficients.
         bins = create_spectral_bins(p.size, grid[0], grid.size, grid[1] - grid[0], 1.5)
-        k = absorption_coefficients(center, strength, gamma, alpha, bins)
+        k = absorption_coefficients(center, strength, gamma, alpha, bins, pedestal)
         destroy_spectral_bins(bins)
         return k*cm_to_m*cm_to_m
 
 
 class SpectralBins(Structure):
+    """Binding to a GRTcode SpectralBins c struct."""
     _fields_ = [("num_layers", c_int),
                 ("w0", c_double),
                 ("wres", c_double),
@@ -152,8 +168,21 @@ class SpectralBins(Structure):
 
 
 def create_spectral_bins(num_layers, w0, n, wres, bin_width, device=HOST):
-    gas_optics.create_spectral_bins.argtypes = [POINTER(SpectralBins), c_int, c_double,
-                                                c_uint64, c_double, c_double, c_int]
+    """Initializes a GRTcode SpectralBins c struct.
+
+    Args:
+        num_layers: Number of layers.
+        w0: Spectral grid lower bound [cm-1].
+        n: Spectral grid size.
+        wres: Spectral grid resolution [cm-1].
+        bin_width: Width of each spectral bin [cm-1].
+        device: Device (host or GPU id) that GRTcode will run on.
+
+    Returns:
+        A SpectralBins object (binded to an initialized GRTcode SpectralBins c struct.
+    """
+    types = [POINTER(SpectralBins), c_int, c_double, c_uint64, c_double, c_double, c_int]
+    gas_optics.create_spectral_bins.argtypes = types
     gas_optics.create_spectral_bins.restype = check_return_code
     bins = SpectralBins()
     gas_optics.create_spectral_bins(byref(bins), c_int(num_layers), c_double(w0),
@@ -163,16 +192,30 @@ def create_spectral_bins(num_layers, w0, n, wres, bin_width, device=HOST):
 
 
 def destroy_spectral_bins(bins):
+    """Frees memory held by a GRTcode SpectralBins c struct.
+
+    Args:
+        bins: A SpectralBins object.
+    """
     gas_optics.destroy_spectral_bins.argtypes = [POINTER(SpectralBins),]
     gas_optics.destroy_spectral_bins.restype = check_return_code
     gas_optics.destroy_spectral_bins(byref(bins))
 
 
 def pressure_shift_line_centers(center, shift, pressure):
+    """Pressure shifts the transition wavenumbers.
+
+    Args:
+        center: Numpy array of transition wavenumbers [cm-1].
+        shift: Numpy array of pressure-shift factors [cm-1 atm-1].
+        pressure: Numpy array of pressures [atm].
+
+    Returns:
+        Numpy array of pressure-shifted transition wavenumbers [cm-1].
+    """
     num_layers, num_lines = pressure.size, center.size
     shifted_center = zeros((num_layers, num_lines))
-    gas_optics.calc_line_centers.argtypes = [c_uint64, c_int] + \
-                                            4*[ndpointer(c_double, flags="C_CONTIGUOUS")]
+    gas_optics.calc_line_centers.argtypes = [c_uint64, c_int] + 4*[cpointer(c_double)]
     gas_optics.calc_line_centers.restype = check_return_code
     gas_optics.calc_line_centers(c_uint64(num_lines), c_int(num_layers),
                                  center, shift, pressure, shifted_center)
@@ -180,10 +223,19 @@ def pressure_shift_line_centers(center, shift, pressure):
 
 
 def total_partition_functions(mol_id, num_iso, temperature):
+    """Calculates the total partition functions.
+
+    Args:
+        mol_id: HITRAN molecule id.
+        num_iso: Number of isotopologues for the molecule.
+        temperature: Numpy array of temperatures [K].
+
+    Returns:
+        Numpy array of total partition functions.
+    """
     num_layers = temperature.size
     partition_function = zeros((num_layers, num_iso))
-    gas_optics.calc_partition_functions.argtypes = 3*[c_int] + \
-                                                   2*[ndpointer(c_double, flags="C_CONTIGUOUS")]
+    gas_optics.calc_partition_functions.argtypes = 3*[c_int] + 2*[cpointer(c_double)]
     gas_optics.calc_partition_functions.restype = check_return_code
     gas_optics.calc_partition_functions(c_int(num_layers), c_int(mol_id), c_int(num_iso),
                                         temperature, partition_function)
@@ -192,12 +244,25 @@ def total_partition_functions(mol_id, num_iso, temperature):
 
 def correct_line_strengths(num_iso, iso, strength_t0, center, energy, temperature,
                            partition_function):
+    """Temperature corrects the transition strengths.
+
+    Args:
+        num_iso: Number of isotopologues for the molecule.
+        iso: Numpy array of HITRAN isotopologue ids.
+        strength_t0: Numpy array of transition strengths [cm].
+        center: Numpy array of transition wavenumbers [cm-1].
+        energy: Numpy array of lower state energies [cm-1].
+        temperature: Numpy array of temperatures [K].
+        partition_function: Numpy array of total partition functions.
+
+    Returns:
+        Numpy array of temperature-corrected transition strengths [cm].
+    """
     num_layers, num_lines = temperature.size, center.size
     strength = zeros((num_layers, num_lines))
     iso_id = asarray(iso, dtype=c_int)
-    gas_optics.calc_line_strengths.argtypes = [c_uint64, c_int, c_int,
-                                               ndpointer(c_int, flags="C_CONTIGUOUS")] + \
-                                              6*[ndpointer(c_double, flags="C_CONTIGUOUS")]
+    types = [c_uint64, c_int, c_int, cpointer(c_int)] + 6*[cpointer(c_double)]
+    gas_optics.calc_line_strengths.argtypes = types
     gas_optics.calc_line_strengths.restype = check_return_code
     gas_optics.calc_line_strengths(c_uint64(num_lines), c_int(num_layers), c_int(num_iso),
                                    iso_id, strength_t0, center, energy, temperature,
@@ -206,11 +271,23 @@ def correct_line_strengths(num_iso, iso, strength_t0, center, energy, temperatur
 
 
 def lorentz_halfwidths(n, yair, yself, temperature, pressure, volume_mixing_ratio):
+    """Calculates Lorentz halfwidths.
+
+    Args:
+        n: Numpy array of temperature dependence powers.
+        yair: Numpy array of air-broadened halfwidths [cm-1 atm-1] at 296 K and 1 atm.
+        yself: Numpy array of self-broadened halfwidths [cm-1 atm-1] at 296 K and 1 atm.
+        temperature: Numpy array of temperatures [K].
+        pressure: Numpy array of pressures [atm].
+        volume_mixing_ratio: Numpy array of volume mixing ratios [mol mol-1].
+
+    Returns:
+        Numpy array of Lorentz halfwidths [cm-1].
+    """
     num_layers, num_lines = temperature.size, yair.size
     gamma = zeros((num_layers, num_lines))
     ps = volume_mixing_ratio[:]*pressure[:]
-    gas_optics.calc_lorentz_hw.argtypes = [c_uint64, c_int] + \
-                                          7*[ndpointer(c_double, flags="C_CONTIGUOUS")]
+    gas_optics.calc_lorentz_hw.argtypes = [c_uint64, c_int] + 7*[cpointer(c_double)]
     gas_optics.calc_lorentz_hw.restype = check_return_code
     gas_optics.calc_lorentz_hw(c_uint64(num_lines), c_int(num_layers), n,
                                yair, yself, temperature, pressure, ps, gamma)
@@ -218,49 +295,93 @@ def lorentz_halfwidths(n, yair, yself, temperature, pressure, volume_mixing_rati
 
 
 def doppler_halfwidths(mass, center, temperature):
+    """Calculates Doppler halfwidths.
+
+    Args:
+        mass: Molar mass of the molecule [g mol-1].
+        center: Numpy array of transition wavenumbers [cm-1].
+        temperature: Numpy array of temperatures [K].
+
+    Returns:
+        Numpy array of Doppler halfwidths [cm-1].
+    """
     num_layers, num_lines = temperature.size, center.size
     alpha = zeros((num_layers, num_lines))
-    gas_optics.calc_doppler_hw.argtypes = [c_uint64, c_int, c_double] + \
-                                          3*[ndpointer(c_double, flags="C_CONTIGUOUS")]
+    gas_optics.calc_doppler_hw.argtypes = [c_uint64, c_int, c_double] + 3*[cpointer(c_double)]
     gas_optics.calc_doppler_hw.restype = check_return_code
-    gas_optics.calc_doppler_hw(c_uint64(num_lines), c_int(num_layers), c_double(mass/6.023e23),
-                               center, temperature, alpha)
+    gas_optics.calc_doppler_hw(c_uint64(num_lines), c_int(num_layers),
+                               c_double(mass/avogadro), center, temperature, alpha)
     return alpha
 
 
 def sort_lines(center, strength, gamma, alpha):
+    """Sorts transitions in order of increasing wavenumber.
+
+    Args:
+        center: Numpy array of transition wavenumbers [cm-1].
+        strength: Numpy array of transitin strengths [cm].
+        gamma: Numpy array of Lorentz halfwidths [cm-1].
+        alpha: Numpy array of Doppler halfwidths [cm-1].
+    """
     num_layers, num_lines = center.shape
-    gas_optics.sort_lines.argtypes = [c_uint64, c_int] + \
-                                     4*[ndpointer(c_double, flags="C_CONTIGUOUS")]
+    gas_optics.sort_lines.argtypes = [c_uint64, c_int] + 4*[cpointer(c_double)]
     gas_optics.sort_lines.restype = check_return_code
     gas_optics.sort_lines(c_uint64(num_lines), c_int(num_layers), center, strength,
                           gamma, alpha)
 
 
-def absorption_coefficients(center, strength, gamma, alpha, bins):
+def absorption_coefficients(center, strength, gamma, alpha, bins, pedestal_bounds=None):
+    """Calculates absorption coefficients.
+
+    Args:
+        center: Numpy array of transition wavenumbers [cm-1].
+        strength: Numpy array of transitin strengths [cm].
+        gamma: Numpy array of Lorentz halfwidths [cm-1].
+        alpha: Numpy array of Doppler halfwidths [cm-1].
+        bins: SpectralBins object.
+        pedestal_bounds: Tuple describing wavenumber [cm-1] range where pedestal is removed.
+
+    Returns:
+        Numpy array of absorption coefficients [cm2].
+    """
     num_layers, num_lines = center.shape
     absorption_coefficient = zeros((num_layers, bins.num_wpoints))
     n = ones(num_layers)
-    sort_lines(center, strength, gamma, alpha)
-    gas_optics.calc_optical_depth_line_sample.argtypes = [c_uint64, c_int] + \
-                                                        5*[ndpointer(c_double, flags="C_CONTIGUOUS")] + \
-                                                        [SpectralBins,
-                                                         ndpointer(c_double, flags="C_CONTIGUOUS")]
+    lower = None if pedestal_bounds is None else asarray(pedestal_bounds[:1])
+    upper = None if pedestal_bounds is None else asarray(pedestal_bounds[1:])
+    types = [c_uint64, c_int] + 5*[cpointer(c_double)] + [SpectralBins,] + \
+            3*[cpointer(c_double)]
+    gas_optics.calc_optical_depth_line_sample.argtypes = types
     gas_optics.calc_optical_depth_line_sample.restype = check_return_code
     gas_optics.calc_optical_depth_line_sample(c_uint64(num_lines), c_int(num_layers),
                                               center, strength, gamma, alpha, n,
-                                              bins, absorption_coefficient)
+                                              bins, absorption_coefficient, lower, upper)
     return absorption_coefficient
 
 
 def water_vapor_continuum(temperature, pressure, volume_mixing_ratio, grid, c_foreign,
                           c_self, t_foreign, t_self):
+    """Calculates water vapor continnum absorption coefficients.
+
+    Args:
+        temperature: Numpy array of temperatures [K].
+        pressure: Numpy array of pressures [atm].
+        volume_mixing_ratio: Numpy array of volume mixing ratios [mol mol-1].
+        grid: Numpy array specifying the wavenumber grid [cm-1].
+        c_foreign: Numpy array of foreign broadening coefficients.
+        c_self: Numpy array of self broadening coefficients.
+        t_foreign: Numpy array of foreign broadening temperature dependence factors.
+        t_self: Numpy array of self broadening temperature dependence factors.
+
+    Returns:
+        Numpy array of absorption coefficients [cm2].
+    """
     num_layers, num_wpoints = temperature.size, grid.size
     absorption_coefficient = zeros((num_layers, num_wpoints))
     ps = pressure[:]*volume_mixing_ratio[:]
     n = ones(num_layers)
-    gas_optics.calc_water_vapor_ctm_optical_depth.argtypes = [c_uint64, c_int] + \
-                                                             9*[ndpointer(c_double, flags="C_CONTIGUOUS")]
+    types = [c_uint64, c_int] + 9*[cpointer(c_double)]
+    gas_optics.calc_water_vapor_ctm_optical_depth.argtypes = types
     gas_optics.calc_water_vapor_ctm_optical_depth.restype = check_return_code
     gas_optics.calc_water_vapor_ctm_optical_depth(c_uint64(num_wpoints), c_int(num_layers),
                                                   absorption_coefficient, c_self,
@@ -270,11 +391,21 @@ def water_vapor_continuum(temperature, pressure, volume_mixing_ratio, grid, c_fo
 
 
 def ozone_continuum(temperature, grid, cross_section):
+    """Calculates ozone continuum absorption coefficients.
+
+    Args:
+        temperature: Numpy array of temperatures [K].
+        grid: Numpy array specifying the wavenumber grid [cm-1].
+        cross_section: Numpy array of ozone cross sections [cm2].
+
+    Returns:
+        Numpy array of absorption coefficients [cm2].
+    """
     num_layers, num_wpoints = temperature.size, grid.size
     absorption_coefficient = zeros((num_layers, num_wpoints))
     n = ones(num_layers)
-    gas_optics.calc_ozone_ctm_optical_depth.argtypes = [c_uint64, c_int] + \
-                                                       3*[ndpointer(c_double,flags="C_CONTIGUOUS")]
+    types = [c_uint64, c_int] + 3*[cpointer(c_double)]
+    gas_optics.calc_ozone_ctm_optical_depth.argtypes = types
     gas_optics.calc_ozone_ctm_optical_depth.restype = check_return_code
     gas_optics.calc_ozone_ctm_optical_depth(c_uint64(num_wpoints), c_int(num_layers),
                                             cross_section, n, absorption_coefficient)
@@ -282,6 +413,17 @@ def ozone_continuum(temperature, grid, cross_section):
 
 
 def check_return_code(value):
+    """Raises an exception if one of the GRTcode c functions fails.
+
+    Args:
+        value: Integer code returned from GRTcode c function.
+
+    Raises:
+        ValueError if GRTcode c function fails.
+
+    Returns:
+        Integer code returned from GRTcode c function.
+    """
     if value != GRTCODE_SUCCESS:
         raise ValueError("GRTCODE c function returned error {}".format(value))
     return value

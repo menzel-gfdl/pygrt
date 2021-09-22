@@ -347,10 +347,10 @@ def absorption_coefficients(center, strength, gamma, alpha, bins, pedestal_bound
     num_layers, num_lines = center.shape
     absorption_coefficient = zeros((num_layers, bins.num_wpoints))
     n = ones(num_layers)
-    lower = None if pedestal_bounds is None else asarray(pedestal_bounds[:1])
-    upper = None if pedestal_bounds is None else asarray(pedestal_bounds[1:])
+    lower = None if pedestal_bounds is None else byref(c_double(pedestal_bounds[0]))
+    upper = None if pedestal_bounds is None else byref(c_double(pedestal_bounds[1]))
     types = [c_uint64, c_int] + 5*[cpointer(c_double)] + [SpectralBins,] + \
-            3*[cpointer(c_double)]
+            [cpointer(c_double),] + 2*[POINTER(c_double)]
     gas_optics.calc_optical_depth_line_sample.argtypes = types
     gas_optics.calc_optical_depth_line_sample.restype = check_return_code
     gas_optics.calc_optical_depth_line_sample(c_uint64(num_lines), c_int(num_layers),

@@ -42,7 +42,7 @@ def _convert_line_parameters(lines):
         spectral_lines.d_air.append(line.parse.delta_air)
         spectral_lines.en.append(line.elower)
         spectral_lines.gamma_air.append(line.parse.gamma_air)
-        spectral_lines.gamma_self.append(line.parse.gamma_air)
+        spectral_lines.gamma_self.append(line.parse.gamma_self)
         spectral_lines.iso.append(line.parse.local_iso_id)
         spectral_lines.n_air.append(line.parse.n_air)
         spectral_lines.s.append(line.sw)

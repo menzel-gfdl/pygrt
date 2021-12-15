@@ -39,12 +39,12 @@ def _convert_line_parameters(lines):
     """
     spectral_lines = SpectralLines()
     for line in lines:
-        spectral_lines.d_air.append(line.parse.delta_air)
+        spectral_lines.d_air.append(line.delta_air)
         spectral_lines.en.append(line.elower)
-        spectral_lines.gamma_air.append(line.parse.gamma_air)
-        spectral_lines.gamma_self.append(line.parse.gamma_self)
-        spectral_lines.iso.append(line.parse.local_iso_id)
-        spectral_lines.n_air.append(line.parse.n_air)
+        spectral_lines.gamma_air.append(line.gamma_air)
+        spectral_lines.gamma_self.append(line.gamma_self)
+        spectral_lines.iso.append(line.local_iso_id)
+        spectral_lines.n_air.append(line.n_air)
         spectral_lines.s.append(line.sw)
         spectral_lines.v.append(line.nu)
     spectral_lines.lists_to_numpy_arrays()
@@ -75,7 +75,7 @@ class SpectralLines(object):
 
 
 class Gas(object):
-    def __init__(self, lines, mol_id, num_iso, avg_mass, device="host"):
+    def __init__(self, transitions, formula, molecule_id, isotopologues, device="host"):
         """Initializes object.
 
         Args:
@@ -86,14 +86,14 @@ class Gas(object):
             device: Device (host or GPU id) to run GRTcode on.
         """
         self.device = HOST if device.lower() == "host" else device
-        self.num_iso = num_iso
-        self.avg_mass = avg_mass
-        self.mol_id = mol_id
-        self.spectral_lines = _convert_line_parameters(lines)
+        self.num_iso = len(isotopologues)
+        self.avg_mass = sum([float(x.mass) for x in isotopologues])/self.num_iso
+        self.mol_id = molecule_id
+        self.spectral_lines = _convert_line_parameters(transitions)
 
         # Do initial correction to the line strengths.
-        q = total_partition_functions(mol_id, num_iso, asarray([296.,]))
-        self.spectral_lines.s[:] /= correct_line_strengths(num_iso,
+        q = total_partition_functions(self.mol_id, self.num_iso, asarray([296.,]))
+        self.spectral_lines.s[:] /= correct_line_strengths(self.num_iso,
                                                            self.spectral_lines.iso,
                                                            ones(self.spectral_lines.v.size),
                                                            self.spectral_lines.v,

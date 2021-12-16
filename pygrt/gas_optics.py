@@ -28,7 +28,7 @@ def cpointer(var_type):
     return ndpointer(var_type, flags="C_CONTIGUOUS")
 
 
-def _convert_line_parameters(lines):
+def _convert_line_parameters(transitions):
     """Converts from HAPI Transitions objects to local SpectralLines objects.
 
     Args:
@@ -38,7 +38,7 @@ def _convert_line_parameters(lines):
         A SpectralLines object.
     """
     spectral_lines = SpectralLines()
-    for line in lines:
+    for line in transitions:
         spectral_lines.d_air.append(line.delta_air)
         spectral_lines.en.append(line.elower)
         spectral_lines.gamma_air.append(line.gamma_air)
@@ -79,10 +79,10 @@ class Gas(object):
         """Initializes object.
 
         Args:
-            lines: List of HAPI Transitions objects.
-            mol_id: Integer Hitran molecule identifier.
-            num_iso: Number of isotopologues in the HITRAN database for the molecule.
-            avg_mass: Mass of the molecule.
+            transitions: List of HAPI Transitions objects.
+            formula: String chemical formula.
+            molecule_id: Integer Hitran molecule identifier.
+            isotopologues: List of HAPIT Isotopologue objects.
             device: Device (host or GPU id) to run GRTcode on.
         """
         self.device = HOST if device.lower() == "host" else device

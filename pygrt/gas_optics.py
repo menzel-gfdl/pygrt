@@ -28,29 +28,6 @@ def cpointer(var_type):
     return ndpointer(var_type, flags="C_CONTIGUOUS")
 
 
-def _convert_line_parameters(transitions):
-    """Converts from HAPI Transitions objects to local SpectralLines objects.
-
-    Args:
-        lines: List of HAPI Transitions objects.
-
-    Returns:
-        A SpectralLines object.
-    """
-    spectral_lines = SpectralLines()
-    for line in transitions:
-        spectral_lines.d_air.append(line.delta_air)
-        spectral_lines.en.append(line.elower)
-        spectral_lines.gamma_air.append(line.gamma_air)
-        spectral_lines.gamma_self.append(line.gamma_self)
-        spectral_lines.iso.append(line.local_iso_id)
-        spectral_lines.n_air.append(line.n_air)
-        spectral_lines.s.append(line.sw)
-        spectral_lines.v.append(line.nu)
-    spectral_lines.lists_to_numpy_arrays()
-    return spectral_lines
-
-
 class SpectralLines(object):
     """HITRAN spectral line parameters.
 
@@ -65,31 +42,44 @@ class SpectralLines(object):
         v: Transition wavenumber.
     """
     parameters = ["d_air", "en", "gamma_air", "gamma_self", "iso", "n_air", "s", "v"]
-    def __init__(self):
+
+    def __init__(self, transitions):
+        """Converts from Transition objects to numpy arrays.
+
+        Args:
+            transitions: List of Transition objects.
+        """
         for x in self.parameters:
             setattr(self, x, [])
-
-    def lists_to_numpy_arrays(self):
+        for transition in transitions:
+            self.d_air.append(transition.delta_air)
+            self.en.append(transition.elower)
+            self.gamma_air.append(transition.gamma_air)
+            self.gamma_self.append(transition.gamma_self)
+            self.iso.append(transition.local_iso_id)
+            self.n_air.append(transition.n_air)
+            self.s.append(transition.sw)
+            self.v.append(transition.nu)
         for x in self.parameters:
             setattr(self, x, asarray(getattr(self, x)))
 
 
 class Gas(object):
-    def __init__(self, transitions, formula, molecule_id, isotopologues, device="host"):
+    def __init__(self, formula, mass, transitions, total_parition_function=None, device="host"):
         """Initializes object.
 
         Args:
-            transitions: List of HAPI Transitions objects.
             formula: String chemical formula.
-            molecule_id: Integer Hitran molecule identifier.
-            isotopologues: List of HAPIT Isotopologue objects.
+            mass: List of isotopologue masses.
+            transitions: List of TransitionTable objects.
+            total_partition_function: Not used.
             device: Device (host or GPU id) to run GRTcode on.
         """
         self.device = HOST if device.lower() == "host" else device
-        self.num_iso = len(isotopologues)
-        self.avg_mass = sum([float(x.mass) for x in isotopologues])/self.num_iso
-        self.mol_id = molecule_id
-        self.spectral_lines = _convert_line_parameters(transitions)
+        self.spectal_lines = SpectralLines(transitions)
+        self.mass = asarray(mass)
+        self.mol_id = transitions[0].molecule_id
+        self.num_iso = len(mass)
 
         # Do initial correction to the line strengths.
         q = total_partition_functions(self.mol_id, self.num_iso, asarray([296.,]))
@@ -101,7 +91,7 @@ class Gas(object):
                                                            asarray([296.,]), q)[0, :]
 
     def absorption_coefficient(self, temperature, pressure, volume_mixing_ratio, grid,
-                               continuum="mt-ckd"):
+                               remove_pedestal=False):
         """Calculates absorption coefficients for the gas using GRTCODE.
 
         Args:
@@ -119,7 +109,7 @@ class Gas(object):
         p = asarray([pressure*9.86923e-6,])
         t = asarray([temperature,])
         vmr = asarray([volume_mixing_ratio,])
-        pedestal = (0., 2.e4) if continuum == "mt-ckd" and self.mol_id == 1 else None
+        pedestal = (0., 2.e4) if remove_pedestal and self.mol_id == 1 else None
 
         #Calcuate line center.
         center = pressure_shift_line_centers(self.spectral_lines.v,
@@ -138,7 +128,7 @@ class Gas(object):
                                    self.spectral_lines.gamma_self, t, p, vmr)
 
         #Calculate doppler half-widths.
-        alpha = doppler_halfwidths(self.avg_mass, self.spectral_lines.v, t)
+        alpha = doppler_halfwidths(self.mass[self.iso[0] - 1], self.spectral_lines.v, t)
 
         #Calculate the molecule's absorption coefficients.
         bins = create_spectral_bins(p.size, grid[0], grid.size, grid[1] - grid[0], 1.5)

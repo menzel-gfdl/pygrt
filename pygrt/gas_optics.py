@@ -128,7 +128,8 @@ class Gas(object):
                                    self.spectral_lines.gamma_self, t, p, vmr)
 
         #Calculate doppler half-widths.
-        alpha = doppler_halfwidths(self.mass[self.iso[0] - 1], self.spectral_lines.v, t)
+        alpha = doppler_halfwidths(self.mass[self.spectral_lines.iso[0] - 1],
+                                   self.spectral_lines.v, t)
 
         #Calculate the molecule's absorption coefficients.
         bins = create_spectral_bins(p.size, grid[0], grid.size, grid[1] - grid[0], 1.5)

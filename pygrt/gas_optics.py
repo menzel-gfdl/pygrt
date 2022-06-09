@@ -47,7 +47,7 @@ class SpectralLines(object):
         """Converts from Transition objects to numpy arrays.
 
         Args:
-            transitions: List of Transition objects.
+            transitions: List of TransitionTable objects.
         """
         for x in self.parameters:
             setattr(self, x, [])
@@ -76,7 +76,7 @@ class Gas(object):
             device: Device (host or GPU id) to run GRTcode on.
         """
         self.device = HOST if device.lower() == "host" else device
-        self.spectal_lines = SpectralLines(transitions)
+        self.spectral_lines = SpectralLines(transitions)
         self.mass = asarray(mass)
         self.mol_id = transitions[0].molecule_id
         self.num_iso = len(mass)
